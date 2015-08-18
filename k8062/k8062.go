@@ -50,7 +50,7 @@ func (self K8062DMXController) sendChannels(dmxUniverse *dmx.DMXUniverse) error 
 	// copied from dll source code
 	var chanIndex = 0
 
-	var numChannel = dmxUniverse.NumChannels
+	var numChannel = dmxUniverse.GetNumChannels()
 	if numChannel < 8 {
 		numChannel = 8
 	}

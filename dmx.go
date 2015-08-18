@@ -10,16 +10,20 @@ type DMXController interface {
 }
 
 type DMXUniverse struct {
-	NumChannels int
 	Channels    [512]uint8
 }
 
 func (dmxUniverse *DMXUniverse) SetChannel(address  int, value uint8) {
-	currentChannels := address + 1
-	if dmxUniverse.NumChannels < currentChannels {
-      dmxUniverse.NumChannels = currentChannels
-   	}
 	dmxUniverse.Channels[address] = value
+}
+
+func (dmxUniverse *DMXUniverse) GetNumChannels() int {
+	for i := len(dmxUniverse.Channels); i > 0; i-- {
+		if (dmxUniverse.Channels[i-1] != 0) {
+			return i
+		}
+	}
+	return 0
 }
 
 type Color struct {
