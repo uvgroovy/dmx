@@ -1,8 +1,8 @@
 package k8062
 
 import (
-	"errors"
 	"fmt"
+	"errors"
 	"github.com/uvgroovy/go-libusb"
 	"github.com/uvgroovy/dmx"
 )
@@ -58,15 +58,16 @@ func (self K8062DMXController) sendChannels(dmxUniverse *dmx.DMXUniverse) error 
 	// remove trailing zeros
 	var advnaceZeros = func() uint8 {
 		var n uint8 = 0
-		for chanIndex = 0; chanIndex < (numChannel - 5); chanIndex++ {
+		for ;chanIndex < (numChannel - 5); chanIndex++ {
 			if dmxUniverse.Channels[chanIndex] != 0 {
 				break
 			}
-			if chanIndex == 100 {
+			if n == 100 {
 				break
 			}
 			n++
 		}
+		
 		return n
 	}
 

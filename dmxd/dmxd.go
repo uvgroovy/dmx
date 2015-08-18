@@ -13,7 +13,7 @@ func sendColors(cont dmx.DMXController, dmxUniverse *dmx.DMXUniverse, devices []
 	for _, d := range devices {
 		d.SetColor(dmxUniverse, c)
 	}
-
+    
 	err := cont.Write(dmxUniverse)
 	if err != nil {
 		fmt.Println(err)
@@ -21,41 +21,17 @@ func sendColors(cont dmx.DMXController, dmxUniverse *dmx.DMXUniverse, devices []
 }
 
 type XL85 struct {
-	*dmx.DMXUniverse
+	StartAddress int
 }
 
-func (x XL85) SetColor(c dmx.Color) {
-	x.NumChannels = 6
-
-	base := 1
-	x.Channels[base+0] = 100
-	x.Channels[base+1] = c.Red
-	x.Channels[base+2] = c.Green
-	x.Channels[base+3] = c.Blue
-	x.Channels[base+4] = 250
-	x.Channels[base+5] = 0
-
-	//	x.Channels[6] = 32
-	/*
-		base := 0
-		x.Channels[base] = 134
-		x.Channels[base+1] = c.Red
-		x.Channels[base+2] = c.Green
-		x.Channels[base+3] = c.Blue
-		x.Channels[base+4] = 255
-		x.Channels[base+5] = 0
-	*/
-
-}
-
-type RGBSpot struct {
-}
-
-func (x RGBSpot) SetColor(dmxUniverse *dmx.DMXUniverse, c dmx.Color) {
-	dmxUniverse.NumChannels = 3
-	dmxUniverse.Channels[1] = c.Red
-	dmxUniverse.Channels[2] = c.Green
-	dmxUniverse.Channels[3] = c.Blue
+func (x XL85) SetColor(dmxUniverse *dmx.DMXUniverse, c dmx.Color) {
+	base := x.StartAddress
+	dmxUniverse.SetChannel(base+0, 100)
+	dmxUniverse.SetChannel(base+1, c.Red)
+	dmxUniverse.SetChannel(base+2, c.Green)
+	dmxUniverse.SetChannel(base+3, c.Blue)
+	dmxUniverse.SetChannel(base+4, 250)
+	dmxUniverse.SetChannel(base+5, 0)
 }
 
 func main() {
@@ -105,11 +81,22 @@ func main() {
 				d.SendChannels()
 				time.Sleep(time.Second)
 			}*/
-		//	lightFixtures = append(lightFixtures, XL85{d})
-		lightFixtures = append(lightFixtures, RGBSpot{})
+		//	lightFixtures = append(lightFixtures, XL85{1})
+		// TODO: read config of config file.
+		/*
+		 RGBLightFixture{1}
+		 RGBLightFixture{4}
+		...
+		
+		*/
+		lightFixtures = append(lightFixtures, dmx.RGBLightFixture{1},dmx.RGBLightFixture{1+3*7})
 	}
 
 	animate2(dmxController, lightFixtures)
+}
+
+func openFixtures() []dmx.LightFixture {
+	return nil
 }
 
 func animate1(dmxController dmx.DMXController, devices []dmx.LightFixture) {
@@ -118,6 +105,7 @@ func animate1(dmxController dmx.DMXController, devices []dmx.LightFixture) {
 	var d dmx.DMXUniverse
 	// do whateverzz
 	for index := 0; ; index = (index + 1) % len(animation) {
+		fmt.Println("send colors")
 		sendColors(dmxController, &d, devices, animation[index])
 		time.Sleep(wait)
 	}
