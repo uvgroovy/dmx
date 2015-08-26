@@ -1,171 +1,230 @@
 package main
 
 import (
-	"os"
-	"encoding/hex"
-	"encoding/json"
-	"io"
 	"fmt"
-	"github.com/uvgroovy/go-libusb"
+	"github.com/hypebeast/go-osc/osc"
 	"github.com/uvgroovy/dmx"
 	"github.com/uvgroovy/dmx/k8062"
+	"github.com/uvgroovy/go-libusb"
+	"os"
 	"time"
 )
 
-func sendColors(cont dmx.DMXController, dmxUniverse *dmx.DMXUniverse, devices []dmx.LightFixture, c dmx.Color) {
+func sendColors(controllers []dmx.DMXController, devices []dmx.LightFixture, c dmx.Color) {
 
+	var dmxUniverse dmx.DMXUniverse = dmx.DMXUniverse{}
 	for _, d := range devices {
-		d.SetColor(dmxUniverse, c)
+		d.SetColor(&dmxUniverse, c)
 	}
-    
-	err := cont.Write(dmxUniverse)
-	if err != nil {
-		fmt.Println(err)
+
+	for _, cont := range controllers {
+		err := cont.Write(&dmxUniverse)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 }
 
-type XL85 struct {
-	StartAddress int
-}
+var ShouldAnimate = make(chan bool, 1)
+var OscColor dmx.Color
 
-func (x XL85) SetColor(dmxUniverse *dmx.DMXUniverse, c dmx.Color) {
-	base := x.StartAddress
-	dmxUniverse.SetChannel(base+0, 100)
-	dmxUniverse.SetChannel(base+1, c.Red)
-	dmxUniverse.SetChannel(base+2, c.Green)
-	dmxUniverse.SetChannel(base+3, c.Blue)
-	dmxUniverse.SetChannel(base+4, 250)
-	dmxUniverse.SetChannel(base+5, 0)
+
+func checkForErrors(dmxControllers []dmx.DMXController) {
+	var d dmx.DMXUniverse
+	// write zero-universe to check that we can write
+	for _,dmxController := range dmxControllers {
+		if err := dmxController.Write(&d); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func main() {
 	libusb.Init()
-	// TOdo check for errors
+	// Todo check for errors
 
 	dmxControllers := k8062.GetDmxControlers()
 	fmt.Printf("Got %d devices\n", len(dmxControllers))
-	if len(dmxControllers) == 0 {
-		return
+
+	checkForErrors(dmxControllers)
+
+	if os.Getenv("OSC_TEST") == "" {
+		if len(dmxControllers) == 0 {
+			return
+		}
 	}
+
 	for _, d := range dmxControllers {
 		defer d.Close()
 	}
-	
-	dmxController := dmxControllers[0]
 
 	lightFixtures := openFixtures()
+
+	keyframes := getKeyFrames()
+
+	setupOsc()
+
+	worker(keyframes, dmxControllers, lightFixtures)
+}
+
+func worker(keyframes KeyFrames, dmxControllers []dmx.DMXController, lightFixtures []dmx.LightFixture) {
+	stop := make(chan bool, 1)
+	stopped := make(chan bool, 1)
+
+	// we start with no animation (obviously as we just started!)
+	currentlyAnimating := false
 	
-	animate2(getKeyFrames(), dmxController, lightFixtures)
-	
-	
+	// we want to animate by default
+	ShouldAnimate <- true
+	// this will work forever
+	for {
+		if <-ShouldAnimate {
+			fmt.Println("should animate")
+			if !currentlyAnimating {
+				go func() {
+					fmt.Println("Anmation start")
+					keyframes.Animate(dmxControllers, lightFixtures, stop)
+					fmt.Println("Anmation end")
+					stopped <- true
+				}()
+				currentlyAnimating = true
+			}
+		} else {
+			fmt.Println("should not animate")
+
+			if currentlyAnimating {
+
+				fmt.Println("waiting for animation to stop")
+				stop <- true
+				<-stopped
+			}
+			currentlyAnimating = false
+			fmt.Println("animation stopped")
+
+			sendColors(dmxControllers, lightFixtures, OscColor)
+
+		}
+
+	}
+
+}
+
+func getBoolFromMessage(msg *osc.Message) (bool, bool) {
+
+	if len(msg.Arguments) != 1 {
+		return false, false
+	}
+	value := msg.Arguments[0]
+	switch value.(type) {
+	case int32:
+		return 0 != (value.(int32)), true
+	case float32:
+		return 0 != (value.(float32)), true
+	}
+
+	return false, false
+}
+
+func getColorFromMessage(msg *osc.Message) (uint8, bool) {
+	if len(msg.Arguments) != 1 {
+		return 0, false
+	}
+
+	color := msg.Arguments[0]
+	switch color.(type) {
+	case float32:
+		return uint8(color.(float32)), true
+	case float64:
+		return uint8(color.(float64)), true
+	case int32:
+		return uint8(color.(int32)), true
+	}
+
+	return 0, false
+}
+
+func setupOsc() {
+
+	addr := "0.0.0.0:12000"
+	server := &osc.Server{Addr: addr}
+	var shouldAnimate = true
+
+	server.Handle("/red", func(msg *osc.Message) {
+		if red, ok := getColorFromMessage(msg); ok && red != OscColor.Red {
+			fmt.Println("Got red", red)
+			OscColor.Red = uint8(red)
+			ShouldAnimate <- shouldAnimate
+		}
+	})
+	server.Handle("/green", func(msg *osc.Message) {
+		if green, ok := getColorFromMessage(msg); ok && green != OscColor.Green {
+			fmt.Println("Got green", green)
+			OscColor.Green = uint8(green)
+			ShouldAnimate <- shouldAnimate
+		}
+	})
+	server.Handle("/blue", func(msg *osc.Message) {
+		if blue, ok := getColorFromMessage(msg); ok && blue != OscColor.Blue {
+			fmt.Println("Got blue", blue)
+			OscColor.Blue = uint8(blue)
+			ShouldAnimate <- shouldAnimate
+		}
+	})
+	server.Handle("/button", func(msg *osc.Message) {
+
+		if value, ok := getBoolFromMessage(msg); ok {
+			shouldAnimate = value
+			fmt.Println("Got button", value)
+		} else {
+			shouldAnimate = !shouldAnimate
+		}
+
+		fmt.Println("Got button")
+		ShouldAnimate <- shouldAnimate
+	})
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			panic(err)
+		}
+	}()
 }
 
 func openFixtures() []dmx.LightFixture {
 
 	lightFixtures := make([]dmx.LightFixture, 0)
-	
+
 	for i := 0; i < 12; i++ {
-		lightFixtures = append(lightFixtures, 	dmx.RGBLightFixture{1 + i*3})
+		lightFixtures = append(lightFixtures, dmx.RGBLightFixture{1 + i*3})
 	}
 	return lightFixtures
 }
 
-func animate1(dmxController dmx.DMXController, devices []dmx.LightFixture) {
-	var animation = []dmx.Color{dmx.Color{Red: 0xff}, dmx.Color{Blue: 0xff}}
-	var wait = 2 * time.Second
-	var d dmx.DMXUniverse
-	// do whateverzz
-	for index := 0; ; index = (index + 1) % len(animation) {
-		fmt.Println("send colors")
-		sendColors(dmxController, &d, devices, animation[index])
-		time.Sleep(wait)
-	}
-
+var DefaultAnimation KeyFrames = []KeyFrame{
+	{[]dmx.Color{dmx.Color{Red: 0xff}}, time.Second},
+	{[]dmx.Color{dmx.Color{Blue: 0xff}}, 2 * time.Second},
+	{[]dmx.Color{dmx.Color{Green: 0xff}}, 2 * time.Second},
+	{[]dmx.Color{dmx.Color{Green: 0xff, Blue: 0xff}}, 2 * time.Second},
+	{[]dmx.Color{dmx.Color{Red: 0xff, Green: 0xff, Blue: 0xff}}, 2 * time.Second},
 }
 
-func white(dmxController dmx.DMXController, devices []dmx.LightFixture) {
-	var d dmx.DMXUniverse
-	// do whateverzz
-	sendColors(dmxController, &d, devices, dmx.Color{Red: 0xff})
-	sendColors(dmxController, &d, devices, dmx.Color{Red: 0xff})
-	
-	time.Sleep(time.Second*2)
-	sendColors(dmxController, &d, devices, dmx.Color{Red: 0xff, Green: 0xff, Blue: 0xff})
-
-}
-
-func interpolate(c1, c2 dmx.Color, r float32) dmx.Color {
-	return dmx.Color{
-		uint8(float32(c1.Red)*(1-r) + r*float32(c2.Red)),
-		uint8(float32(c1.Green)*(1-r) + r*float32(c2.Green)),
-		uint8(float32(c1.Blue)*(1-r) + r*float32(c2.Blue)),
-	}
-}
-
-type Keyframe struct {
-		Color dmx.Color
-		Duration   time.Duration
-}
-
-func parseColor(color string) dmx.Color {
-	var data [1]byte
-	hex.Decode(data[:], []byte(color[:2]))
-	r := data[0]
-	hex.Decode(data[:], []byte(color[2:4]))
-	g := data[0]
-	hex.Decode(data[:], []byte(color[4:5]))
-	b := data[0]
-	return dmx.Color{r,g,b};
-}
-
-func ReadKeyframes(reader io.Reader) []Keyframe {
-	keyframes := make([]Keyframe,0)
-	type KeyframeJson struct {
-		Color string
-		Duration  int
-	}
-		
-	dec := json.NewDecoder(reader)
-	for {
-		var frame KeyframeJson
-		if err := dec.Decode(&frame); err == io.EOF {
-			break
-		} else if err != nil {
-			panic(err)
-		}
-		curDuration := int64(time.Millisecond) * int64(frame.Duration)
-		curKeyFrame := Keyframe{Color: parseColor(frame.Color), Duration: time.Duration(curDuration)}
-		keyframes = append(keyframes, curKeyFrame)
-		fmt.Printf("%v\n", curKeyFrame)
-	}
-	
-	return keyframes
-}
-
-var DefaultAnimation = []Keyframe{
-	{dmx.Color{Red: 0xff},  time.Second},
-	{dmx.Color{Blue: 0xff}, 2 * time.Second},
-	{dmx.Color{Green: 0xff}, 2 * time.Second},
-	{dmx.Color{Green: 0xff, Blue: 0xff}, 2 * time.Second},
-	{dmx.Color{Red: 0xff, Green: 0xff, Blue: 0xff}, 2 * time.Second},
-}
-
-func getKeyFrames() []Keyframe {
+func getKeyFrames() KeyFrames {
 	var input *os.File
-	
+
 	if len(os.Args) == 2 {
 		if os.Args[1] == "-" {
-			input = os.Stdin	
+			input = os.Stdin
 			fmt.Println("Reading animation from stdin")
 		} else {
-			input,err := os.Open(os.Args[1])
+			var err error
+			input, err = os.Open(os.Args[1])
 			if err != nil {
 				panic("can't open animation file")
 			}
-			defer input.Close()	
+			defer input.Close()
 			fmt.Println("Reading animation from file", os.Args[1])
 		}
-		
+
 		return ReadKeyframes(input)
 	} else {
 		fmt.Println("Using default animation")
@@ -173,25 +232,14 @@ func getKeyFrames() []Keyframe {
 	}
 }
 
-func animate2(animation []Keyframe, dmxController dmx.DMXController, devices []dmx.LightFixture) {
-	var d dmx.DMXUniverse
-
-	var frame time.Duration = time.Second / 30
-
+func animate1(dmxControllers []dmx.DMXController, devices []dmx.LightFixture) {
+	var animation = []dmx.Color{dmx.Color{Red: 0xff}, dmx.Color{Blue: 0xff}}
+	var wait = 2 * time.Second
+	// do whateverzz
 	for index := 0; ; index = (index + 1) % len(animation) {
-		keyframe1 := animation[index]
-		keyframe2 := animation[(index+1)%len(animation)]
-
-		animTime := keyframe1.Duration
-		ticks := int(animTime / frame)
-
-		for i := 0; i < ticks; i++ {
-			var r float32 = float32(i) / float32(ticks)
-			newColor := interpolate(keyframe1.Color, keyframe2.Color, r)
-			sendColors(dmxController, &d, devices, newColor)
-			time.Sleep(frame)
-		}
-
+		fmt.Println("send colors")
+		sendColors(dmxControllers, devices, animation[index])
+		time.Sleep(wait)
 	}
 
 }
