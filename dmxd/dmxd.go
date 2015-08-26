@@ -124,21 +124,13 @@ func ReadKeyframes(reader io.Reader) []Keyframe {
 		Color string
 		Duration  int
 	}
-	// jsonStream="[{Color:'ff00ff',Duration : 1000}]"
-	// strings.NewReader(jsonStream)
+		
 	dec := json.NewDecoder(reader)
-	_, err := dec.Token()
-	if err != nil {
-		panic(err)
-	}
-
-	var frame KeyframeJson
-	// while the array contains values
-	for dec.More() {
-
-		// decode an array value (Message)
-		err := dec.Decode(&frame)
-		if err != nil {
+	for {
+		var frame KeyframeJson
+		if err := dec.Decode(&frame); err == io.EOF {
+			break
+		} else if err != nil {
 			panic(err)
 		}
 		curDuration := int64(time.Millisecond) * int64(frame.Duration)
@@ -146,12 +138,7 @@ func ReadKeyframes(reader io.Reader) []Keyframe {
 		keyframes = append(keyframes, curKeyFrame)
 		fmt.Printf("%v\n", curKeyFrame)
 	}
-
-	// read closing bracket
-	_, err = dec.Token()
-	if err != nil {
-		panic(err)
-	}
+	
 	return keyframes
 }
 
