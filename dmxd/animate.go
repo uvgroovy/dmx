@@ -51,7 +51,7 @@ func parseColor(colors []string) []dmx.Color {
 func ReadKeyframes(reader io.Reader) KeyFrames {
 	keyframes := make([]KeyFrame, 0)
 	type KeyframeJson struct {
-		Colors    []string
+		Colors   []string
 		Duration float64
 	}
 	dec := json.NewDecoder(reader)

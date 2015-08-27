@@ -25,14 +25,14 @@ func sendColors(controllers []dmx.DMXController, devices []dmx.LightFixture, c d
 	}
 }
 
-var ShouldAnimate = make(chan bool, 1)
+// 100 to support smoother transisions with fast changes
+var ShouldAnimate = make(chan bool, 100)
 var OscColor dmx.Color
-
 
 func checkForErrors(dmxControllers []dmx.DMXController) {
 	var d dmx.DMXUniverse
 	// write zero-universe to check that we can write
-	for _,dmxController := range dmxControllers {
+	for _, dmxController := range dmxControllers {
 		if err := dmxController.Write(&d); err != nil {
 			panic(err)
 		}
@@ -68,17 +68,31 @@ func main() {
 }
 
 func worker(keyframes KeyFrames, dmxControllers []dmx.DMXController, lightFixtures []dmx.LightFixture) {
+	// request to stop animation signal
 	stop := make(chan bool, 1)
+	// stopping complete signal
 	stopped := make(chan bool, 1)
 
 	// we start with no animation (obviously as we just started!)
 	currentlyAnimating := false
-	
+
 	// we want to animate by default
 	ShouldAnimate <- true
 	// this will work forever
 	for {
-		if <-ShouldAnimate {
+		// grab a valid value from the channel (wait if needed)
+		var shouldAnimate bool = <-ShouldAnimate
+		// if channel still not empty clear it out and take the last value
+OuterLoop:
+		for {
+			select {
+			case shouldAnimate = <-ShouldAnimate:
+			default:
+				break OuterLoop
+			}
+		}
+
+		if shouldAnimate {
 			fmt.Println("should animate")
 			if !currentlyAnimating {
 				go func() {
