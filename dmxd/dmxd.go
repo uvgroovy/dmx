@@ -67,6 +67,20 @@ func main() {
 	worker(keyframes, dmxControllers, lightFixtures)
 }
 
+func shouldAnimate() bool {
+
+		// grab a valid value from the channel (wait if needed)
+		var shouldAnimate bool = <-ShouldAnimate
+		// if channel still not empty clear it out and take the last value
+		for {
+			select {
+			case shouldAnimate = <-ShouldAnimate:
+			default:
+				return shouldAnimate
+			}
+		}
+}
+
 func worker(keyframes KeyFrames, dmxControllers []dmx.DMXController, lightFixtures []dmx.LightFixture) {
 	// request to stop animation signal
 	stop := make(chan bool, 1)
@@ -78,21 +92,10 @@ func worker(keyframes KeyFrames, dmxControllers []dmx.DMXController, lightFixtur
 
 	// we want to animate by default
 	ShouldAnimate <- true
+	
 	// this will work forever
 	for {
-		// grab a valid value from the channel (wait if needed)
-		var shouldAnimate bool = <-ShouldAnimate
-		// if channel still not empty clear it out and take the last value
-OuterLoop:
-		for {
-			select {
-			case shouldAnimate = <-ShouldAnimate:
-			default:
-				break OuterLoop
-			}
-		}
-
-		if shouldAnimate {
+		if shouldAnimate() {
 			fmt.Println("should animate")
 			if !currentlyAnimating {
 				go func() {
@@ -208,7 +211,7 @@ func openFixtures() []dmx.LightFixture {
 
 	lightFixtures := make([]dmx.LightFixture, 0)
 
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 8; i++ {
 		lightFixtures = append(lightFixtures, dmx.RGBLightFixture{1 + i*3})
 	}
 	return lightFixtures
@@ -219,7 +222,7 @@ var DefaultAnimation KeyFrames = []KeyFrame{
 	{[]dmx.Color{dmx.Color{Blue: 0xff}}, 2 * time.Second},
 	{[]dmx.Color{dmx.Color{Green: 0xff}}, 2 * time.Second},
 	{[]dmx.Color{dmx.Color{Green: 0xff, Blue: 0xff}}, 2 * time.Second},
-	{[]dmx.Color{dmx.Color{Red: 0xff, Green: 0xff, Blue: 0xff}}, 2 * time.Second},
+	{[]dmx.Color{dmx.Color{Red: 0xff, Green: 0x11, Blue: 0x11}}, 2 * time.Second},
 }
 
 func getKeyFrames() KeyFrames {
