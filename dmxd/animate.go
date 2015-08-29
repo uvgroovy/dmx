@@ -71,13 +71,12 @@ func ReadKeyframes(reader io.Reader) KeyFrames {
 	return keyframes
 }
 
-func getColor(keyframe KeyFrame, index int) dmx.Color {
+func (keyframe KeyFrame) GetColor(index int) dmx.Color {
 	if index < len(keyframe.Colors) {
 		return keyframe.Colors[index]
 	}
 
 	return keyframe.Colors[len(keyframe.Colors)-1]
-
 }
 
 type KeyFrames []KeyFrame
@@ -96,7 +95,7 @@ func (animation KeyFrames) Animate(dmxControllers []dmx.DMXController, fixtures 
 		for i := 0; i < ticks; i++ {
 			var r float32 = float32(i) / float32(ticks)
 			for index, fixture := range fixtures {
-				newColor := interpolate(getColor(keyframe1, index), getColor(keyframe2, index), r)
+				newColor := interpolate(keyframe1.GetColor(index), keyframe2.GetColor(index), r)
 				fixture.SetColor(&dmxUniverse, newColor)
 			}
 

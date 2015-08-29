@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/hypebeast/go-osc/osc"
+	"github.com/mattn/go-gtk/gdk"
+	"github.com/mattn/go-gtk/glib"
+	"github.com/mattn/go-gtk/gtk"
 	"github.com/uvgroovy/dmx"
 	"github.com/uvgroovy/dmx/k8062"
 	"github.com/uvgroovy/go-libusb"
@@ -47,8 +50,8 @@ func main() {
 	fmt.Printf("Got %d devices\n", len(dmxControllers))
 
 	checkForErrors(dmxControllers)
-
-	if os.Getenv("OSC_TEST") == "" {
+	// yuval
+	if os.Getenv("OSC_TEST") != "" {
 		if len(dmxControllers) == 0 {
 			return
 		}
@@ -56,6 +59,11 @@ func main() {
 
 	for _, d := range dmxControllers {
 		defer d.Close()
+	}
+	gui := true
+	if gui {
+		dmxControllers = append(dmxControllers, <-GetGuiController())
+		gdk.ThreadsInit()
 	}
 
 	lightFixtures := openFixtures()
@@ -65,20 +73,86 @@ func main() {
 	setupOsc()
 
 	worker(keyframes, dmxControllers, lightFixtures)
+
+}
+
+func GetGuiController() <-chan *GuiController {
+	controler := make(chan *GuiController, 1)
+
+	go func() {
+		gtk.Init(nil)
+		controler <- CreateGuiController()
+		gtk.Main()
+	}()
+
+	return controler
+}
+
+// implements DMXController
+type GuiController struct {
+	buttons []*gtk.Button
+}
+
+func CreateGuiController() *GuiController {
+	guiController := &GuiController{}
+	guiController.buttons = make([]*gtk.Button, 0)
+	window := gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
+	window.SetPosition(gtk.WIN_POS_CENTER)
+	window.SetTitle("GTK Go!")
+	window.SetIconName("gtk-dialog-info")
+	window.Connect("destroy", func(ctx *glib.CallbackContext) {
+		fmt.Println("got destroy!", ctx.Data().(string))
+		gtk.MainQuit()
+	}, "foo")
+
+	buttonsBox := gtk.NewHBox(false, 1)
+
+	black := gdk.NewColorRGB(0, 0, 0)
+
+	for i := 0; i < 8; i++ {
+		button := gtk.NewButtonWithLabel(fmt.Sprint(i))
+
+		button.ModifyBG(gtk.STATE_NORMAL, black)
+		guiController.buttons = append(guiController.buttons, button)
+		buttonsBox.Add(button)
+	}
+
+	window.Add(buttonsBox)
+	window.SetSizeRequest(600, 600)
+	window.ShowAll()
+
+	return guiController
+}
+
+func (g *GuiController) Close() error {
+	return nil
+}
+func (g *GuiController) Write(dmxUniverse *dmx.DMXUniverse) error {
+	gdk.ThreadsEnter()
+	for i := 0; i < 3*8; i += 3 {
+
+		c := gdk.NewColorRGB(dmxUniverse.Channels[i], dmxUniverse.Channels[i+1], dmxUniverse.Channels[i+2])
+
+		g.buttons[i/3].ModifyBG(gtk.STATE_NORMAL, c)
+	}
+
+	gdk.ThreadsLeave()
+
+	return nil
 }
 
 func shouldAnimate() bool {
 
-		// grab a valid value from the channel (wait if needed)
-		var shouldAnimate bool = <-ShouldAnimate
-		// if channel still not empty clear it out and take the last value
-		for {
-			select {
-			case shouldAnimate = <-ShouldAnimate:
-			default:
-				return shouldAnimate
-			}
+	// grab a valid value from the channel (wait if needed)
+	var shouldAnimate bool = <-ShouldAnimate
+	// if channel still not empty clear it out and take the last value
+	for {
+		select {
+		case shouldAnimate = <-ShouldAnimate:
+		default:
+			return shouldAnimate
 		}
+	}
 }
 
 func worker(keyframes KeyFrames, dmxControllers []dmx.DMXController, lightFixtures []dmx.LightFixture) {
@@ -92,7 +166,7 @@ func worker(keyframes KeyFrames, dmxControllers []dmx.DMXController, lightFixtur
 
 	// we want to animate by default
 	ShouldAnimate <- true
-	
+
 	// this will work forever
 	for {
 		if shouldAnimate() {
